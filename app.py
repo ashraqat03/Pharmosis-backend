@@ -1,5 +1,5 @@
 """
-PharmoScan — Flask Backend
+Pharosis — Flask Backend
 Loads the voting ensemble and serves predictions via /predict
 """
 
@@ -136,11 +136,40 @@ def get_molecular_features(smiles):
         for i in range(PHARM_FP_SIZE):
             features[f"PharmFP_{i}"] = 0
 
-    # E. Spatial features (zeros for new molecules — no 3D conformer)
-    for f1, f2 in combinations(FEATURE_TYPES, 2):
-        features[f"sp_dist_{f1}_{f2}"] = 0.0
+    # E. Spatial pharmacophore features — computed from 2D topology
+    FAMILY_MAP = {
+        "HBDonor":      "HBD",
+        "HBAcceptor":   "HBA",
+        "Hydrophobe":   "Hyd",
+        "Aromatic":     "Aro",
+        "PosIonizable": "PosI",
+        "NegIonizable": "NegI",
+    }
+
+    mol_feats      = _feat_factory.GetFeaturesForMol(mol)
+    counts         = {ft: 0 for ft in FEATURE_TYPES}
+    atoms_by_type  = {ft: [] for ft in FEATURE_TYPES}
+
+    for f in mol_feats:
+        ft = FAMILY_MAP.get(f.GetFamily())
+        if ft:
+            counts[ft] += 1
+            atoms_by_type[ft].extend(list(f.GetAtomIds()))
+
     for ft in FEATURE_TYPES:
-        features[f"sp_n_{ft}"] = 0.0
+        features[f"sp_n_{ft}"] = float(counts[ft])
+
+    from rdkit.Chem import rdmolops
+    dist_matrix = rdmolops.GetDistanceMatrix(mol)
+
+    for f1, f2 in combinations(FEATURE_TYPES, 2):
+        atoms1 = atoms_by_type[f1]
+        atoms2 = atoms_by_type[f2]
+        if atoms1 and atoms2:
+            dists = [dist_matrix[a1][a2] for a1 in atoms1 for a2 in atoms2]
+            features[f"sp_dist_{f1}_{f2}"] = float(np.mean(dists))
+        else:
+            features[f"sp_dist_{f1}_{f2}"] = 0.0
 
     return features
 
@@ -158,7 +187,7 @@ def features_to_arrays(feat_dict):
 # ── Routes ───────────────────────────────────────────────────
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "model": "PharmoScan voting ensemble"})
+    return jsonify({"status": "ok", "model": "Pharosis voting ensemble"})
 
 
 @app.route("/predict", methods=["POST"])
